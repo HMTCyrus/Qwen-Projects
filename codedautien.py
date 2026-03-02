@@ -376,28 +376,46 @@ class ReadingTrackerApp:
                 self.current_book_index -= 1
 
     def refresh_home_books(self):
+        # Temporarily disable UI updates during refresh
+        self.books_container.grid_remove()
+        
         for widget in self.books_container.winfo_children():
             widget.destroy()
 
         if not self.books:
             ttk.Label(self.books_container, text="Chưa có cuốn sách nào. Hãy thêm sách mới!").pack(pady=20)
+            self.books_container.grid()
             return
 
         row, col = 0, 0
         max_col = 3
 
-        for idx, book in enumerate(self.books):
+        # Pre-calculate time strings to avoid repeated calculations
+        book_time_strings = []
+        for book in self.books:
+            total_seconds = book["_total_seconds"]
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+            seconds = total_seconds % 60
+            time_str = f"{hours} giờ {minutes} phút {seconds} giây" if hours > 0 else f"{minutes} phút {seconds} giây"
+            book_time_strings.append(time_str)
+
+        for idx, (book, time_str) in enumerate(zip(self.books, book_time_strings)):
             card = tk.Frame(self.books_container, relief=tk.RIDGE, borderwidth=2, bg='#f0f0f0', padx=10, pady=10)
             card.grid(row=row, column=col, padx=10, pady=10, sticky="nsew")
 
+            # Create a closure-friendly function for event binding
+            def make_click_handler(i):
+                return lambda e: self.show_detail(i)
+            
+            def make_right_click_handler(i):
+                return lambda e: self.show_card_context_menu(e, i)
+
             card.bind("<Enter>", lambda e, c=card: self.on_card_enter(e, c))
             card.bind("<Leave>", lambda e, c=card: self.on_card_leave(e, c))
-            card.bind("<Button-1>", lambda e, i=idx: self.show_detail(i))
-            card.bind("<Button-3>", lambda e, i=idx: self.show_card_context_menu(e, i))
-            for child in card.winfo_children():
-                child.bind("<Button-1>", lambda e, i=idx: self.show_detail(i))
-                child.bind("<Button-3>", lambda e, i=idx: self.show_card_context_menu(e, i))
-
+            card.bind("<Button-1>", make_click_handler(idx))
+            card.bind("<Button-3>", make_right_click_handler(idx))
+            
             title_frame = tk.Frame(card, bg='#f0f0f0')
             title_frame.pack(fill=tk.X)
 
@@ -413,16 +431,11 @@ class ReadingTrackerApp:
 
             tk.Label(card, text=f"Tác giả: {book.get('author', '')}", font=("Arial", 9, "italic"), bg='#f0f0f0').pack(anchor=tk.W, pady=2)
 
-            total_seconds = book["_total_seconds"]
-            hours = total_seconds // 3600
-            minutes = (total_seconds % 3600) // 60
-            seconds = total_seconds % 60
-            time_str = f"{hours} giờ {minutes} phút {seconds} giây" if hours > 0 else f"{minutes} phút {seconds} giây"
             tk.Label(card, text=f"Đã đọc: {time_str}", bg='#f0f0f0').pack(anchor=tk.W, pady=2)
 
             target = book.get("target_seconds", 0)
             if target > 0:
-                percent = min(100, int((total_seconds / target) * 100))
+                percent = min(100, int((book["_total_seconds"] / target) * 100))
                 tk.Label(card, text=f"Mục tiêu: {percent}%", bg='#f0f0f0').pack(anchor=tk.W)
                 progress = ttk.Progressbar(card, length=150, mode='determinate', value=percent)
                 progress.pack(anchor=tk.W, pady=2)
@@ -436,6 +449,9 @@ class ReadingTrackerApp:
 
         for i in range(max_col):
             self.books_container.columnconfigure(i, weight=1)
+            
+        # Re-enable UI updates
+        self.books_container.grid()
 
     def prompt_for_input(self, title, prompt, initial_value=""):
         dialog = tk.Toplevel(self.root)
@@ -1558,7 +1574,10 @@ Chúc bạn đọc sách hiệu quả!
                     book = self.books[self.current_book_index]
                     book["sessions"].append(session)
                     book["_total_seconds"] += self.target_seconds
-                    book["_virtual_sessions"] = book["_total_seconds"] // self.target_seconds
+                    # Optimize by calculating virtual sessions only once
+                    total_seconds = book["_total_seconds"]
+                    target_seconds = self.target_seconds
+                    book["_virtual_sessions"] = total_seconds // target_seconds if target_seconds > 0 else 0
                     self.save_data()
                     self.update_stats_label()
                     self.update_target_display()
